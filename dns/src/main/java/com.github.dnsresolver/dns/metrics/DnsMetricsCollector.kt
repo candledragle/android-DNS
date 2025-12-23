@@ -1,4 +1,4 @@
-package com.example.h5.ytdemo.dns.metrics
+package com.github.dnsresolver.dns.metrics
 
 /**
  * DNS 指标收集器接口
@@ -197,4 +197,5 @@ object NoOpDnsMetricsCollector : DnsMetricsCollector {
     override fun getAggregatedStats(): DnsAggregatedStats = DnsAggregatedStats()
     override fun clearStats() {}
 }
+
 

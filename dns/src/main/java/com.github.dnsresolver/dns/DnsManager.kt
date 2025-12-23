@@ -1,9 +1,9 @@
-package com.example.h5.ytdemo.dns
+package com.github.dnsresolver.dns
 
-import com.example.h5.ytdemo.dns.metrics.DnsMetricsCollector
-import com.example.h5.ytdemo.dns.metrics.NoOpDnsMetricsCollector
+import com.example.h5.ytdemo.dns.MultiDnsResolver
+import com.github.dnsresolver.dns.metrics.DnsMetricsCollector
+import com.github.dnsresolver.dns.metrics.NoOpDnsMetricsCollector
 import okhttp3.Dns
-import okhttp3.OkHttpClient
 
 /**
  * DNS 管理器
@@ -13,7 +13,7 @@ import okhttp3.OkHttpClient
 class DnsManager(
     private val resolverFactory: DnsResolverFactory = DnsResolverFactory,
     private val useSystemDnsFirst: Boolean = true,
-    private val dohProviders: List<DnsProvider> = DnsProvider.getAllProviders(),
+    private val dohProviders: List<DnsProvider> = DnsProvider.Companion.getAllProviders(),
     private val metricsCollector: DnsMetricsCollector = NoOpDnsMetricsCollector
 ) {
     // 缓存已创建的 DoH 解析器
@@ -58,7 +58,7 @@ class DnsManager(
         enableMetrics: Boolean = true
     ): Dns {
         val resolvers = customOrder ?: buildDefaultResolverOrder()
-        val resolverNames = null ?: buildDefaultResolverNames()
+        val resolverNames = buildDefaultResolverNames()
 
         return if (enableMetrics && metricsCollector != NoOpDnsMetricsCollector) {
             MetricsMultiDnsResolver(resolvers, resolverNames, metricsCollector)
@@ -163,7 +163,7 @@ class DnsManager(
          */
         fun createCustom(
             useSystemDnsFirst: Boolean = true,
-            providers: List<DnsProvider> = DnsProvider.getAllProviders(),
+            providers: List<DnsProvider> = DnsProvider.Companion.getAllProviders(),
             metricsCollector: DnsMetricsCollector = NoOpDnsMetricsCollector
         ): DnsManager {
             return DnsManager(
@@ -174,4 +174,5 @@ class DnsManager(
         }
     }
 }
+
 

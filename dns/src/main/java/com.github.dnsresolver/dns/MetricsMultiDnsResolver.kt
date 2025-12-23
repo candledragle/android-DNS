@@ -1,6 +1,10 @@
-package com.example.h5.ytdemo.dns
+package com.github.dnsresolver.dns
 
-import com.example.h5.ytdemo.dns.metrics.*
+import com.github.dnsresolver.dns.metrics.DnsEvent
+import com.github.dnsresolver.dns.metrics.DnsEventType
+import com.github.dnsresolver.dns.metrics.DnsMetrics
+import com.github.dnsresolver.dns.metrics.DnsMetricsCollector
+import com.github.dnsresolver.dns.metrics.NoOpDnsMetricsCollector
 import okhttp3.Dns
 import java.net.InetAddress
 import java.net.UnknownHostException
@@ -180,4 +184,5 @@ class MetricsMultiDnsResolver(
      */
     fun getResolvers(): List<Dns> = resolvers.toList()
 }
+
 

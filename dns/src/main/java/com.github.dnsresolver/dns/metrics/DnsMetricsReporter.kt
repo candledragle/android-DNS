@@ -1,4 +1,6 @@
-package com.example.h5.ytdemo.dns.metrics
+package com.github.dnsresolver.dns.metrics
+
+import java.util.Locale
 
 /**
  * DNS 指标报告器
@@ -24,7 +26,7 @@ object DnsMetricsReporter {
         sb.appendLine("  失败数: ${stats.totalFailure}")
         if (stats.totalRequests > 0) {
             val successRate = (stats.totalSuccess.toDouble() / stats.totalRequests * 100).let {
-                String.format("%.2f", it)
+                String.format(Locale.US, "%.2f", it)
             }
             sb.appendLine("  成功率: $successRate%")
         }
@@ -38,8 +40,24 @@ object DnsMetricsReporter {
                 sb.appendLine("    总请求数: ${resolverStat.totalRequests}")
                 sb.appendLine("    成功数: ${resolverStat.successCount}")
                 sb.appendLine("    失败数: ${resolverStat.failureCount}")
-                sb.appendLine("    成功率: ${String.format("%.2f", resolverStat.successRate * 100)}%")
-                sb.appendLine("    平均耗时: ${String.format("%.2f", resolverStat.avgDurationMs)} ms")
+                sb.appendLine(
+                    "    成功率: ${
+                        String.format(
+                            Locale.US,
+                            "%.2f",
+                            resolverStat.successRate * 100
+                        )
+                    }%"
+                )
+                sb.appendLine(
+                    "    平均耗时: ${
+                        String.format(
+                            Locale.US,
+                            "%.2f",
+                            resolverStat.avgDurationMs
+                        )
+                    } ms"
+                )
                 if (resolverStat.minDurationMs != Long.MAX_VALUE) {
                     sb.appendLine("    最小耗时: ${resolverStat.minDurationMs} ms")
                 }
@@ -61,12 +79,21 @@ object DnsMetricsReporter {
                 sb.appendLine("    成功数: ${hostnameStat.successCount}")
                 sb.appendLine("    失败数: ${hostnameStat.failureCount}")
                 if (hostnameStat.totalRequests > 0) {
-                    val successRate = (hostnameStat.successCount.toDouble() / hostnameStat.totalRequests * 100).let {
-                        String.format("%.2f", it)
-                    }
+                    val successRate =
+                        (hostnameStat.successCount.toDouble() / hostnameStat.totalRequests * 100).let {
+                            String.format(Locale.US, "%.2f", it)
+                        }
                     sb.appendLine("    成功率: $successRate%")
                 }
-                sb.appendLine("    平均耗时: ${String.format("%.2f", hostnameStat.avgDurationMs)} ms")
+                sb.appendLine(
+                    "    平均耗时: ${
+                        String.format(
+                            Locale.US,
+                            "%.2f",
+                            hostnameStat.avgDurationMs
+                        )
+                    } ms"
+                )
                 sb.appendLine()
             }
         }
@@ -87,15 +114,15 @@ object DnsMetricsReporter {
         sb.appendLine("  \"totalSuccess\": ${stats.totalSuccess},")
         sb.appendLine("  \"totalFailure\": ${stats.totalFailure},")
         sb.appendLine("  \"resolverStats\": {")
-        
+
         val resolverEntries = stats.resolverStats.entries.joinToString(",\n") { (name, stat) ->
             """
-            "${name}": {
+            "$name": {
               "totalRequests": ${stat.totalRequests},
               "successCount": ${stat.successCount},
               "failureCount": ${stat.failureCount},
-              "successRate": ${String.format("%.2f", stat.successRate)},
-              "avgDurationMs": ${String.format("%.2f", stat.avgDurationMs)},
+              "successRate": ${String.format(Locale.US, "%.2f", stat.successRate)},
+              "avgDurationMs": ${String.format(Locale.US, "%.2f", stat.avgDurationMs)},
               "minDurationMs": ${stat.minDurationMs},
               "maxDurationMs": ${stat.maxDurationMs}
             }""".trimIndent()
@@ -107,4 +134,5 @@ object DnsMetricsReporter {
         return sb.toString()
     }
 }
+
 

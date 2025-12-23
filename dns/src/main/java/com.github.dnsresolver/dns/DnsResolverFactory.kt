@@ -1,4 +1,4 @@
-package com.example.h5.ytdemo.dns
+package com.github.dnsresolver.dns
 
 import okhttp3.Dns
 import okhttp3.OkHttpClient
@@ -40,4 +40,5 @@ object DnsResolverFactory {
         return Dns.SYSTEM
     }
 }
+
 

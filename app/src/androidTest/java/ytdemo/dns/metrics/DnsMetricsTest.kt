@@ -1,13 +1,12 @@
 package ytdemo.dns.metrics
 
-import com.example.h5.ytdemo.dns.DnsManager
-import com.example.h5.ytdemo.dns.DnsProvider
-import com.example.h5.ytdemo.dns.metrics.DefaultDnsMetricsCollector
-import com.example.h5.ytdemo.dns.metrics.DnsEvent
-import com.example.h5.ytdemo.dns.metrics.DnsEventType
-import com.example.h5.ytdemo.dns.metrics.DnsMetrics
-import com.example.h5.ytdemo.dns.metrics.DnsMetricsReporter
-import com.example.h5.ytdemo.dns.metrics.NoOpDnsMetricsCollector
+import com.github.dnsresolver.dns.DnsManager
+import com.github.dnsresolver.dns.metrics.DefaultDnsMetricsCollector
+import com.github.dnsresolver.dns.metrics.DnsEvent
+import com.github.dnsresolver.dns.metrics.DnsEventType
+import com.github.dnsresolver.dns.metrics.DnsMetrics
+import com.github.dnsresolver.dns.metrics.DnsMetricsReporter
+import com.github.dnsresolver.dns.metrics.NoOpDnsMetricsCollector
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test

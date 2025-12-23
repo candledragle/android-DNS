@@ -1,12 +1,10 @@
-package com.example.h5.ytdemo.dns
+package com.github.dnsresolver.dns
 
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.LinkProperties
-import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Build
-import java.net.InetAddress
 
 /**
  * 系统 DNS 信息
@@ -41,7 +39,7 @@ object SystemDnsInfoHelper {
 
     /**
      * 获取系统 DNS 信息
-     * 
+     *
      * @param context Android Context
      * @return 系统 DNS 信息，如果无法获取则返回 null
      */
@@ -55,7 +53,7 @@ object SystemDnsInfoHelper {
                 getSystemDnsInfoModern(connectivityManager)
             } else {
                 // Android 5.x 及以下使用旧方法
-                getSystemDnsInfoLegacy(connectivityManager)
+                getSystemDnsInfoLegacy()
             }
         } catch (e: Exception) {
             null
@@ -84,7 +82,7 @@ object SystemDnsInfoHelper {
             val isVpn = networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
 
             // 获取 LinkProperties（包含 DNS 信息）
-            val linkProperties = connectivityManager.getLinkProperties(activeNetwork)
+            val linkProperties: LinkProperties? = connectivityManager.getLinkProperties(activeNetwork)
             val dnsServers = linkProperties?.dnsServers?.map { it.hostAddress } ?: emptyList()
             val interfaceName = linkProperties?.interfaceName
 
@@ -101,12 +99,11 @@ object SystemDnsInfoHelper {
     /**
      * Android 5.x 及以下获取 DNS 信息的方法（通过系统属性）
      */
-    private fun getSystemDnsInfoLegacy(connectivityManager: ConnectivityManager): SystemDnsInfo? {
+    private fun getSystemDnsInfoLegacy(): SystemDnsInfo? {
         val dnsServers = mutableListOf<String>()
 
         // 尝试通过系统属性获取 DNS
         try {
-            // 方法1: 通过 getprop 获取（需要 root 权限，普通应用可能无法获取）
             val process = Runtime.getRuntime().exec("getprop")
             val reader = process.inputStream.bufferedReader()
             reader.useLines { lines ->
@@ -120,27 +117,7 @@ object SystemDnsInfoHelper {
                 }
             }
         } catch (e: Exception) {
-            // 如果无法通过 getprop 获取，尝试其他方法
-        }
-
-        // 方法2: 尝试从网络接口获取
-        if (dnsServers.isEmpty()) {
-            try {
-                val networkInterfaces = java.net.NetworkInterface.getNetworkInterfaces()
-                for (networkInterface in networkInterfaces) {
-                    if (networkInterface.isUp && !networkInterface.isLoopback) {
-                        val addresses = networkInterface.inetAddresses
-                        for (address in addresses) {
-                            if (address is java.net.Inet4Address) {
-                                // 这里只能获取到接口的 IP，无法直接获取 DNS 服务器
-                                // 但可以记录接口信息
-                            }
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                // 忽略错误
-            }
+            // 忽略错误
         }
 
         return if (dnsServers.isNotEmpty()) {
@@ -155,8 +132,8 @@ object SystemDnsInfoHelper {
     }
 
     /**
-     * 获取所有可用网络的 DNS 信息
-     * 
+     * 获取所有可用网络的 DNS 信息（Android 6.0+ 有效）
+     *
      * @param context Android Context
      * @return 所有网络的 DNS 信息列表
      */
@@ -197,8 +174,8 @@ object SystemDnsInfoHelper {
                         }
                     }
                 }
-            } catch (e: Exception) {
-                // 忽略错误
+            } catch (_: Exception) {
+                // ignore errors, return what we have
             }
         }
 
@@ -206,18 +183,18 @@ object SystemDnsInfoHelper {
     }
 
     /**
-     * 格式化系统 DNS 信息为可读字符串
+     * Format a single SystemDnsInfo instance into a human‑readable string.
      */
     fun formatDnsInfo(info: SystemDnsInfo): String {
         val sb = StringBuilder()
-        sb.appendLine("网络类型: ${info.networkType ?: "未知"}")
-        sb.appendLine("是否 VPN: ${if (info.isVpn) "是" else "否"}")
+        sb.appendLine("Network type: ${info.networkType ?: "UNKNOWN"}")
+        sb.appendLine("Is VPN: ${if (info.isVpn) "YES" else "NO"}")
         if (info.interfaceName != null) {
-            sb.appendLine("网络接口: ${info.interfaceName}")
+            sb.appendLine("Interface: ${info.interfaceName}")
         }
-        sb.appendLine("DNS 服务器:")
+        sb.appendLine("DNS servers:")
         if (info.dnsServers.isEmpty()) {
-            sb.appendLine("  无")
+            sb.appendLine("  (none)")
         } else {
             info.dnsServers.forEachIndexed { index, dns ->
                 sb.appendLine("  ${index + 1}. $dns")
@@ -225,5 +202,20 @@ object SystemDnsInfoHelper {
         }
         return sb.toString()
     }
+
+    /**
+     * Format a list of SystemDnsInfo instances into a human‑readable string.
+     */
+    fun formatAllDnsInfo(list: List<SystemDnsInfo>): String {
+        if (list.isEmpty()) return "No DNS info available"
+
+        val sb = StringBuilder()
+        list.forEachIndexed { index, info ->
+            sb.appendLine("===== Network #${index + 1} =====")
+            sb.appendLine(formatDnsInfo(info))
+        }
+        return sb.toString()
+    }
 }
+
 

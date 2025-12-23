@@ -1,7 +1,8 @@
-package com.example.h5.ytdemo.dns
+package com.github.dnsresolver.dns
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.Dns
 import java.net.InetAddress
 import java.net.UnknownHostException
 
@@ -29,13 +30,13 @@ class CoroutineDnsAdapter(
     /**
      * 创建级联 DNS 解析器
      */
-    private val cascadingResolver: okhttp3.Dns by lazy {
+    private val cascadingResolver: Dns by lazy {
         dnsManager.createCascadingResolver()
     }
 
     /**
      * 解析域名
-     * 
+     *
      * @param hostname 要解析的域名
      * @return IP 地址列表
      */
@@ -79,31 +80,4 @@ class CoroutineDnsAdapter(
     }
 }
 
-/**
- * Ktor 项目使用说明（如果将来需要集成 Ktor）：
- * 
- * 1. 添加 Ktor 依赖到 build.gradle.kts:
- *    ```kotlin
- *    implementation("io.ktor:ktor-client-core:2.x.x")
- *    implementation("io.ktor:ktor-client-okhttp:2.x.x") // 如果使用 OkHttp 引擎
- *    ```
- * 
- * 2. 在 Ktor HttpClient 中使用 OkHttp 引擎并配置 DNS:
- *    ```kotlin
- *    val dnsManager = DnsManager.createDefault()
- *    val client = HttpClient(OkHttp) {
- *        engine {
- *            config {
- *                dns(dnsManager.createCascadingResolver())
- *            }
- *        }
- *    }
- *    ```
- * 
- * 3. 或者使用协程适配器在自定义拦截器中解析:
- *    ```kotlin
- *    val dnsAdapter = CoroutineDnsAdapter(dnsManager)
- *    // 在拦截器中使用 dnsAdapter.resolve(hostname)
- *    ```
- */
 

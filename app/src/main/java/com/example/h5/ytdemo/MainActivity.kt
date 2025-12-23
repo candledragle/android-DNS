@@ -24,15 +24,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import com.adjust.sdk.Adjust
-import com.adjust.sdk.AdjustConfig
-import com.adjust.sdk.BuildConfig
-import com.adjust.sdk.LogLevel
-import com.example.h5.ytdemo.dns.DnsManager
-import com.example.h5.ytdemo.dns.SystemDnsInfoHelper
-import com.example.h5.ytdemo.dns.metrics.AdjustDnsMetricsCollector
-import com.example.h5.ytdemo.dns.metrics.DnsMetricsReporter
 import com.example.h5.ytdemo.ui.theme.YTDemoTheme
+import com.github.dnsresolver.dns.DnsManager
+import com.github.dnsresolver.dns.SystemDnsInfoHelper
+import com.github.dnsresolver.dns.metrics.DnsMetricsFacade
+import com.github.dnsresolver.dns.metrics.LogDnsMetricsCollector
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import kotlinx.coroutines.runBlocking
 import okhttp3.Credentials
 import okhttp3.Dns
 import okhttp3.MediaType.Companion.toMediaType
@@ -46,18 +53,22 @@ import kotlin.concurrent.thread
 
 class MainActivity : ComponentActivity() {
 
+    private lateinit var content: () -> Unit
+
     /**
-     * DNS 指标收集器：使用 Adjust 进行打点
-     * 所有 DNS 解析事件和指标会发送到 Adjust 平台
+     * DNS Metrics Collector: Output metrics to Android Log
+     * All DNS resolution events and metrics will be output to Android Log (tag: "DnsMetrics")
+     *
+     * The logging switch is controlled by the App via DnsMetricsFacade.setLoggingEnabled(...)
      */
-    private val dnsMetricsCollector: AdjustDnsMetricsCollector by lazy {
-        AdjustDnsMetricsCollector(this)
+    private val dnsMetricsCollector: LogDnsMetricsCollector by lazy {
+        DnsMetricsFacade.createLogCollector(tag = "DnsMetrics")
     }
 
     /**
      * DNS 管理器：统一管理所有 DNS 解析器
      * 使用默认配置：系统 DNS 优先，然后按顺序尝试所有 DoH 提供商
-     * 所有 DNS 解析指标会通过 AdjustDnsMetricsCollector 发送到 Adjust
+     * 所有 DNS 解析指标会通过 LogDnsMetricsCollector 输出到日志
      */
     private val dnsManager: DnsManager by lazy {
         DnsManager.createDefault(
@@ -79,22 +90,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        // 初始化 Adjust SDK
-        // TODO: 替换为你的 Adjust App Token（在 Adjust Dashboard 中获取）
-        val adjustAppToken = "" // 例如: "your_app_token_here"
-        val environment = if (BuildConfig.DEBUG) {
-            AdjustConfig.ENVIRONMENT_SANDBOX // 测试环境
-        } else {
-            AdjustConfig.ENVIRONMENT_PRODUCTION // 生产环境
-        }
-        
-        if (adjustAppToken.isNotEmpty()) {
-            val adjustConfig = AdjustConfig(this, adjustAppToken, environment)
-            adjustConfig.setLogLevel(LogLevel.VERBOSE) // 调试时使用，生产环境建议改为 INFO 或 WARN
-            Adjust.onCreate(adjustConfig)
-        }
-        
+        // Let App control DNS metrics logging switch via facade
+        // Here we enable logging only in debug builds
+        DnsMetricsFacade.setLoggingEnabled(BuildConfig.DEBUG)
+
         enableEdgeToEdge()
 
         setContent {
@@ -122,6 +121,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // 注意：当使用 AdjustDnsMetricsCollector 时，需要添加以下生命周期回调
+    /*
     override fun onResume() {
         super.onResume()
         Adjust.onResume()
@@ -131,49 +132,49 @@ class MainActivity : ComponentActivity() {
         super.onPause()
         Adjust.onPause()
     }
+    */
 
     /**
-     * 构建带可选代理与认证的 OkHttpClient
+     * 构建带可选代理与认证的 Ktor HttpClient（OkHttp 引擎）
      */
     private fun buildClientWithProxy(
         proxy: String?,
         proxyUser: String?,
         proxyPass: String?
-    ): OkHttpClient {
-        val clientBuilder = OkHttpClient.Builder()
+    ): HttpClient {
+        return HttpClient(OkHttp) {
+            install(ContentNegotiation)
 
-        // 所有请求的 DNS 解析按顺序尝试：系统 DNS → Cloudflare DoH → Google DoH → Quad9 DoH → Wikimedia DNS DoH
-        clientBuilder.dns(multiDns)
+            engine {
+                config {
+                    // 所有请求的 DNS 解析按顺序尝试：系统 DNS → Cloudflare DoH → Google DoH → Quad9 DoH → Wikimedia DNS DoH
+                    dns(multiDns)
 
-        if (!proxy.isNullOrBlank()) {
-            // 解析 ip:port
-            val parts = proxy.split(":")
-            if (parts.size == 2) {
-                val host = parts[0]
-                val port = parts[1].toIntOrNull() ?: 0
-                if (host.isNotBlank() && port > 0) {
-                    val proxyObj = Proxy(Proxy.Type.HTTP, InetSocketAddress(host, port))
-                    clientBuilder.proxy(proxyObj)
+                    if (!proxy.isNullOrBlank()) {
+                        val parts = proxy.split(":")
+                        if (parts.size == 2) {
+                            val host = parts[0]
+                            val port = parts[1].toIntOrNull() ?: 0
+                            if (host.isNotBlank() && port > 0) {
+                                val proxyObj = Proxy(Proxy.Type.HTTP, InetSocketAddress(host, port))
+                                proxy(proxyObj)
 
-                    // 如果有用户名和密码，使用 Proxy-Authorization 头做 Basic 认证
-                    if (!proxyUser.isNullOrBlank() && !proxyPass.isNullOrBlank()) {
-
-                        val credential = Credentials.basic(proxyUser, proxyPass)
-
-                        // 通过网络拦截器为所有请求加上 Proxy-Authorization
-                        clientBuilder.addNetworkInterceptor { chain ->
-                            val newReq = chain.request()
-                                .newBuilder()
-                                .header("Proxy-Authorization", credential)
-                                .build()
-                            chain.proceed(newReq)
+                                if (!proxyUser.isNullOrBlank() && !proxyPass.isNullOrBlank()) {
+                                    val credential = Credentials.basic(proxyUser, proxyPass)
+                                    addNetworkInterceptor { chain ->
+                                        val newReq = chain.request()
+                                            .newBuilder()
+                                            .header("Proxy-Authorization", credential)
+                                            .build()
+                                        chain.proceed(newReq)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
-
-        return clientBuilder.build()
     }
 
     /**
@@ -326,16 +327,13 @@ class MainActivity : ComponentActivity() {
         proxyPass: String?,
         onResult: (String) -> Unit
     ) {
-        // 在后台线程中执行网络请求，避免阻塞 UI
         thread {
             try {
                 val url =
                     "https://music.youtube.com/youtubei/v1/browse?key=AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
 
-                // 构建 OkHttpClient，可选代理
                 val client = buildClientWithProxy(proxy, proxyUser, proxyPass)
 
-                // 构建请求体（与 Python payload 一致）
                 val jsonBody = """
                     {
                       "context": {
@@ -353,37 +351,36 @@ class MainActivity : ComponentActivity() {
                     }
                 """.trimIndent()
 
-                val mediaType = "application/json".toMediaType()
-                val body = jsonBody.toRequestBody(mediaType)
+                val result = runBlocking {
+                    val response = client.post(url) {
+                        contentType(ContentType.Application.Json)
+                        setBody(jsonBody)
+                        header("host", "music.youtube.com")
+                        header("origin", "https://music.youtube.com")
+                        header("referer", "https://music.youtube.com/")
+                        header("x-goog-visitor-id", "CgtTa204bnp3OTctOCjY4c-vBjIKCgJVUxIEGgAgFg%3D%3D")
+                        header("x-youtube-client-name", "67")
+                        header("content-type", "application/json")
+                        header("x-youtube-client-version", "1.20250903.03.00")
+                        header("accept-language", "en, en;q=0.9")
+                        header("accept-encoding", "gzip")
+                        header("user-agent", "okhttp/5.2.1")
+                    }
 
-                val request = Request.Builder()
-                    .url(url)
-                    .post(body)
-                    .header("host", "music.youtube.com")
-                    .header("origin", "https://music.youtube.com")
-                    .header("referer", "https://music.youtube.com/")
-                    .header("x-goog-visitor-id", "CgtTa204bnp3OTctOCjY4c-vBjIKCgJVUxIEGgAgFg%3D%3D")
-                    .header("x-youtube-client-name", "67")
-                    .header("content-type", "application/json")
-                    .header("x-youtube-client-version", "1.20250903.03.00")
-                    .header("accept-language", "en, en;q=0.9")
-                    .header("accept-encoding", "gzip")
-                    .header("user-agent", "okhttp/5.2.1")
-                    .build()
+                    val status = response.status.value
+                    val headers = response.headers.toString()
+                    val bodyStr = response.bodyAsText()
 
-                val response = client.newCall(request).execute()
+                    client.close()
 
-                val status = response.code
-                val headers = response.headers.toString()
-                val bodyStr = response.body?.string().orEmpty()
-
-                val result = buildString {
-                    appendLine("状态码: $status")
-                    appendLine("响应头:")
-                    appendLine(headers.trim())
-                    appendLine("----------")
-                    appendLine("响应体前 2000 字符:")
-                    appendLine(bodyStr.take(2000))
+                    buildString {
+                        appendLine("状态码: $status")
+                        appendLine("响应头:")
+                        appendLine(headers.trim())
+                        appendLine("----------")
+                        appendLine("响应体前 2000 字符:")
+                        appendLine(bodyStr.take(2000))
+                    }
                 }
 
                 runOnUiThread {
@@ -464,25 +461,25 @@ class MainActivity : ComponentActivity() {
 
                 val client = buildClientWithProxy(proxy, proxyUser, proxyPass)
 
-                val request = Request.Builder()
-                    .url(url)
-                    .get()
-                    .header("User-Agent", "okhttp/5.2.1")
-                    .build()
+                val result = runBlocking {
+                    val response = client.get(url) {
+                        header("User-Agent", "okhttp/5.2.1")
+                    }
 
-                val response = client.newCall(request).execute()
+                    val status = response.status.value
+                    val headers = response.headers.toString()
+                    val bodyStr = response.bodyAsText()
 
-                val status = response.code
-                val headers = response.headers.toString()
-                val bodyStr = response.body?.string().orEmpty()
+                    client.close()
 
-                val result = buildString {
-                    appendLine("状态码: $status")
-                    appendLine("响应头:")
-                    appendLine(headers.trim())
-                    appendLine("----------")
-                    appendLine("响应体前 2000 字符:")
-                    appendLine(bodyStr.take(2000))
+                    buildString {
+                        appendLine("状态码: $status")
+                        appendLine("响应头:")
+                        appendLine(headers.trim())
+                        appendLine("----------")
+                        appendLine("响应体前 2000 字符:")
+                        appendLine(bodyStr.take(2000))
+                    }
                 }
 
                 runOnUiThread {

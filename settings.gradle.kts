@@ -21,4 +21,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "YTDemo"
 include(":app")
+include(":dns")
  

@@ -53,3 +53,4 @@ class MultiDnsResolver(
     fun getResolvers(): List<Dns> = resolvers.toList()
 }
 
+

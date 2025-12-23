@@ -1,4 +1,4 @@
-package com.example.h5.ytdemo.dns
+package com.github.dnsresolver.dns
 
 import java.net.InetAddress
 
@@ -40,7 +40,7 @@ data class DnsProvider(
          * 获取所有可用的 DNS 提供商
          */
         fun getAllProviders(): List<DnsProvider> {
-            return listOf(CLOUDFLARE, GOOGLE, QUAD9, WIKIMEDIA)
+            return listOf(CLOUDFLARE, GOOGLE, WIKIMEDIA, QUAD9)
         }
     }
 
@@ -51,4 +51,5 @@ data class DnsProvider(
         return bootstrapIps.map { InetAddress.getByName(it) }
     }
 }
+
 

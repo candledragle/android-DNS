@@ -52,6 +52,8 @@ android {
     }
     buildFeatures {
         compose = true
+        // Ensure BuildConfig class is generated for this module
+        buildConfig = true
     }
 }
 
@@ -60,8 +62,11 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.okhttp)
-    implementation(libs.okhttp.dnsoverhttps)
-    implementation(libs.adjust)
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.okhttp)
+    implementation(libs.ktor.client.content.negotiation)
+    implementation(libs.ktor.serialization.kotlinx.json)
+    implementation(project(":dns"))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)

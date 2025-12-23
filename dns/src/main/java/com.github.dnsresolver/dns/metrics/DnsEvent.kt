@@ -1,4 +1,4 @@
-package com.example.h5.ytdemo.dns.metrics
+package com.github.dnsresolver.dns.metrics
 
 import java.net.InetAddress
 
@@ -86,4 +86,5 @@ data class DnsEvent(
      */
     val timestamp: Long = System.currentTimeMillis()
 )
+
 

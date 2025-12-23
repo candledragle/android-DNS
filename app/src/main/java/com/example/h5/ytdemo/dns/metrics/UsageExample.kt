@@ -1,6 +1,12 @@
 package com.example.h5.ytdemo.dns.metrics
 
-import com.example.h5.ytdemo.dns.DnsManager
+import com.github.dnsresolver.dns.DnsManager
+import com.github.dnsresolver.dns.metrics.DefaultDnsMetricsCollector
+import com.github.dnsresolver.dns.metrics.DnsAggregatedStats
+import com.github.dnsresolver.dns.metrics.DnsEvent
+import com.github.dnsresolver.dns.metrics.DnsMetrics
+import com.github.dnsresolver.dns.metrics.DnsMetricsCollector
+import com.github.dnsresolver.dns.metrics.DnsMetricsReporter
 import okhttp3.OkHttpClient
 
 /**

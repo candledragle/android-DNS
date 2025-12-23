@@ -1,9 +1,8 @@
 package ytdemo.dns
 
-import com.example.h5.ytdemo.dns.DnsManager
-import com.example.h5.ytdemo.dns.DnsProvider
-import com.example.h5.ytdemo.dns.metrics.DefaultDnsMetricsCollector
-import okhttp3.Dns
+import com.github.dnsresolver.dns.DnsManager
+import com.github.dnsresolver.dns.DnsProvider
+import com.github.dnsresolver.dns.metrics.DefaultDnsMetricsCollector
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test

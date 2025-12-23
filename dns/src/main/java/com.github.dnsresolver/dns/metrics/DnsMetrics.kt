@@ -1,4 +1,4 @@
-package com.example.h5.ytdemo.dns.metrics
+package com.github.dnsresolver.dns.metrics
 
 import java.net.InetAddress
 
@@ -166,5 +166,12 @@ data class HostnameStats(
      * 平均耗时（毫秒）
      */
     val avgDurationMs: Double = 0.0
-)
+) {
+    /**
+     * 成功率（0.0 - 1.0）
+     */
+    val successRate: Double
+        get() = if (totalRequests > 0) successCount.toDouble() / totalRequests else 0.0
+}
+
 
