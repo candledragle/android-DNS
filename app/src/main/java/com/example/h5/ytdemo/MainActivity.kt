@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -37,8 +38,10 @@ import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.util.toByteArray
 import kotlinx.coroutines.runBlocking
 import okhttp3.Credentials
 import okhttp3.Dns
@@ -50,6 +53,21 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
 import kotlin.concurrent.thread
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 
 class MainActivity : ComponentActivity() {
 
@@ -88,6 +106,22 @@ class MainActivity : ComponentActivity() {
         dnsManager.createCascadingResolver()
     }
 
+    /**
+     * 为 ExoPlayer 创建带自定义 DNS 的 OkHttpClient
+     */
+    private val exoPlayerOkHttpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .dns(multiDns)
+            .build()
+    }
+
+    /**
+     * 为 ExoPlayer 创建数据源工厂（使用自定义 DNS）
+     */
+    private val exoPlayerDataSourceFactory: OkHttpDataSource.Factory by lazy {
+        OkHttpDataSource.Factory(exoPlayerOkHttpClient)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Let App control DNS metrics logging switch via facade
@@ -114,11 +148,19 @@ class MainActivity : ComponentActivity() {
                         },
                         onGetSystemDns = { onResult ->
                             getSystemDnsInfo(onResult)
-                        }
+                        },
+                        exoPlayerOkHttpClient = exoPlayerOkHttpClient,
+                        exoPlayerDataSourceFactory = exoPlayerDataSourceFactory
                     )
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // 释放 ExoPlayer 的 OkHttpClient 资源（如果需要）
+        // 注意：exoPlayerOkHttpClient 是 lazy 初始化的，只有在使用 ExoPlayer 时才会创建
     }
 
     // 注意：当使用 AdjustDnsMetricsCollector 时，需要添加以下生命周期回调
@@ -187,42 +229,6 @@ class MainActivity : ComponentActivity() {
     ) {
         thread {
             try {
-                // 1) 先直接调用 Cloudflare DoH 的 JSON 接口，拿到解析结果（证明由三方 DNS 解析）
-                // 使用 bootstrap DNS (1.1.1.1, 1.0.0.1) 避免系统 DNS 解析 cloudflare-dns.com
-                // 注意：这里不能使用 DoH 来解析 cloudflare-dns.com 本身（会循环依赖），
-                // 所以使用 bootstrap DNS 直接解析 cloudflare-dns.com
-                val bootstrapDns: Dns = object : Dns {
-                    override fun lookup(hostname: String): List<InetAddress> {
-                        return if (hostname == "cloudflare-dns.com") {
-                            // 使用 Cloudflare DoH 的已知 IP，避免依赖系统 DNS
-                            listOf(
-                                InetAddress.getByName("104.16.132.229"),
-                                InetAddress.getByName("104.16.133.229")
-                            )
-                        } else {
-                            Dns.SYSTEM.lookup(hostname)
-                        }
-                    }
-                }
-                
-                val client = OkHttpClient.Builder()
-                    .dns(bootstrapDns)
-                    .build()
-                val url =
-                    "https://cloudflare-dns.com/dns-query?name=${domain}&type=A&ct=application/dns-json"
-
-                val request = Request.Builder()
-                    .url(url)
-                    .header("Accept", "application/dns-json")
-                    .build()
-
-                val response = client.newCall(request).execute()
-
-                val status = response.code
-                val headers = response.headers.toString()
-                // 使用 UTF-8 对 DoH 返回内容进行解码
-                val bodyBytes = response.body?.bytes()
-                val bodyStr = bodyBytes?.toString(Charsets.UTF_8).orEmpty()
 
                 // 2) 可选：如果是测试 music.youtube.com，再用「multiDns（系统 DNS → Cloudflare DoH → Google DoH → Quad9 DoH → Wikimedia DNS DoH）」去发起真正的 HTTPS 请求
                 var musicStatus: Int? = null
@@ -230,69 +236,71 @@ class MainActivity : ComponentActivity() {
                 var musicBody: String? = null
 
                 if (domain.equals("music.youtube.com", ignoreCase = true)) {
-                    // 这里把 multiDns 挂到 OkHttp 上，
+                    // 这里使用 Ktor Client + OkHttp 引擎，并将 multiDns 挂到 OkHttp 上，
                     // 按顺序尝试：系统 DNS → Cloudflare DoH → Google DoH → Quad9 DoH → Wikimedia DNS DoH，再发起请求
-                    val dohClient = OkHttpClient.Builder()
-                        .dns(multiDns)
-                        .build()
-
-                    val musicUrl =
-                        "https://music.youtube.com/youtubei/v1/browse?key=AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
-
-                    val jsonBody = """
-                        {
-                          "context": {
-                            "client": {
-                              "visitorData": "CgtTa204bnp3OTctOCjY4c-vBjIKCgJVUxIEGgAgFg%3D%3D",
-                              "hl": "en",
-                              "gl": "NG",
-                              "clientName": "WEB_REMIX",
-                              "clientVersion": "1.20250903.03.00",
-                              "originalUrl": "https://music.youtube.com/",
-                              "platform": "DESKTOP"
+                    runBlocking {
+                        val dohClient = HttpClient(OkHttp) {
+                            engine {
+                                config {
+                                    dns(multiDns)
+                                }
                             }
-                          },
-                          "browseId": "FEmusic_home"
                         }
-                    """.trimIndent()
 
-                    val mediaType = "application/json".toMediaType()
-                    val body = jsonBody.toRequestBody(mediaType)
+                        try {
+                            val musicUrl =
+                                "https://music.youtube.com/youtubei/v1/browse?key=AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
 
-                    val musicRequest = Request.Builder()
-                        .url(musicUrl)
-                        .post(body)
-                        .header("host", "music.youtube.com")
-                        .header("origin", "https://music.youtube.com")
-                        .header("referer", "https://music.youtube.com/")
-                        .header(
-                            "x-goog-visitor-id",
-                            "CgtTa204bnp3OTctOCjY4c-vBjIKCgJVUxIEGgAgFg%3D%3D"
-                        )
-                        .header("x-youtube-client-name", "67")
-                        .header("content-type", "application/json")
-                        .header("x-youtube-client-version", "1.20250903.03.00")
-                        .header("accept-language", "en, en;q=0.9")
-                        .header("accept-encoding", "gzip")
-                        .header("user-agent", "okhttp/5.2.1")
-                        .build()
+                            val jsonBody = """
+                                {
+                                  "context": {
+                                    "client": {
+                                      "visitorData": "CgtTa204bnp3OTctOCjY4c-vBjIKCgJVUxIEGgAgFg%3D%3D",
+                                      "hl": "en",
+                                      "gl": "NG",
+                                      "clientName": "WEB_REMIX",
+                                      "clientVersion": "1.20250903.03.00",
+                                      "originalUrl": "https://music.youtube.com/",
+                                      "platform": "DESKTOP"
+                                    }
+                                  },
+                                  "browseId": "FEmusic_home"
+                                }
+                            """.trimIndent()
 
-                    val musicResponse = dohClient.newCall(musicRequest).execute()
+                            val musicResponse = dohClient.post(musicUrl) {
+                                contentType(ContentType.Application.Json)
+                                setBody(jsonBody)
+                                header("host", "music.youtube.com")
+                                header("origin", "https://music.youtube.com")
+                                header("referer", "https://music.youtube.com/")
+                                header(
+                                    "x-goog-visitor-id",
+                                    "CgtSa204bnp3OTctOCjY4c-vBjIKCgJVUxIEGgAgFg%3D%3D"
+                                )
+                                header("x-youtube-client-name", "67")
+                                header("content-type", "application/json")
+                                header("x-youtube-client-version", "1.20250903.03.00")
+                                header("accept-language", "en, en;q=0.9")
+                                header("accept-encoding", "gzip")
+                                header("user-agent", "okhttp/5.2.1")
+                            }
 
-                    musicStatus = musicResponse.code
-                    musicHeaders = musicResponse.headers.toString()
-                    // 使用 UTF-8 对 music.youtube.com 返回内容进行解码
-                    val musicBytes = musicResponse.body?.bytes()
-                    musicBody = musicBytes?.toString(Charsets.UTF_8).orEmpty()
+                            musicStatus = musicResponse.status.value
+                            musicHeaders = musicResponse.headers.toString()
+
+                            // 以二进制读取再按 UTF-8 解码，避免 charset 解析错误
+                            val musicBytes = musicResponse.bodyAsChannel().toByteArray()
+                            musicBody = runCatching { musicBytes.toString(Charsets.UTF_8) }
+                                .getOrElse { "Failed to decode body as UTF-8 (size=${musicBytes.size})" }
+                        } finally {
+                            // 确保响应已读取完毕再关闭 client
+                            dohClient.close()
+                        }
+                    }
                 }
 
                 val result = buildString {
-                    appendLine("DoH 状态码: $status")
-                    appendLine("DoH 响应头:")
-                    appendLine(headers.trim())
-                    appendLine("----------")
-                    appendLine("DoH 响应体前 2000 字符:")
-                    appendLine(bodyStr.take(2000))
 
                     if (musicStatus != null) {
                         appendLine()
@@ -311,6 +319,7 @@ class MainActivity : ComponentActivity() {
                     onResult(result)
                 }
             } catch (e: Exception) {
+                e.printStackTrace()
                 runOnUiThread {
                     onResult("DoH 查询异常: ${e.message}")
                 }
@@ -358,7 +367,10 @@ class MainActivity : ComponentActivity() {
                         header("host", "music.youtube.com")
                         header("origin", "https://music.youtube.com")
                         header("referer", "https://music.youtube.com/")
-                        header("x-goog-visitor-id", "CgtTa204bnp3OTctOCjY4c-vBjIKCgJVUxIEGgAgFg%3D%3D")
+                        header(
+                            "x-goog-visitor-id",
+                            "CgtTa204bnp3OTctOCjY4c-vBjIKCgJVUxIEGgAgFg%3D%3D"
+                        )
                         header("x-youtube-client-name", "67")
                         header("content-type", "application/json")
                         header("x-youtube-client-version", "1.20250903.03.00")
@@ -515,7 +527,9 @@ private fun MainScreen(
     ) -> Unit,
     onGetSystemDns: (
         onResult: (String) -> Unit
-    ) -> Unit
+    ) -> Unit,
+    exoPlayerOkHttpClient: OkHttpClient,
+    exoPlayerDataSourceFactory: OkHttpDataSource.Factory
 ) {
     var currentTab by remember { mutableStateOf(0) }
 
@@ -541,6 +555,12 @@ private fun MainScreen(
             ) {
                 Text("DoH 测试")
             }
+            Button(
+                onClick = { currentTab = 2 },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("ExoPlayer 测试")
+            }
         }
 
         when (currentTab) {
@@ -558,6 +578,13 @@ private fun MainScreen(
                     .padding(top = 8.dp),
                 onTestDoh = onTestDoh,
                 onGetSystemDns = onGetSystemDns
+            )
+
+            2 -> ExoPlayerTestScreen(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = 8.dp),
+                exoPlayerDataSourceFactory = exoPlayerDataSourceFactory
             )
         }
     }
@@ -709,6 +736,161 @@ private fun DohTestScreen(
 
         Text(
             text = result,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp)
+                .verticalScroll(scrollState)
+        )
+    }
+}
+
+@Composable
+private fun ExoPlayerTestScreen(
+    modifier: Modifier = Modifier,
+    exoPlayerDataSourceFactory: OkHttpDataSource.Factory
+) {
+    var videoUrl by remember { mutableStateOf("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4") }
+    var statusText by remember { mutableStateOf("输入视频 URL 后点击播放") }
+    val scrollState = rememberScrollState()
+
+    // 创建 ExoPlayer 实例
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    val player = remember {
+        ExoPlayer.Builder(context)
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(exoPlayerDataSourceFactory)
+
+            )
+            .build()
+    }
+
+    // 管理 ExoPlayer 生命周期
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> {
+                    player.pause()
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    // 不自动播放，由用户控制
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            player.release()
+        }
+    }
+
+    // 监听播放器状态
+    LaunchedEffect(player) {
+        player.addListener(object : Player.Listener {
+            override fun onPlayerStateChanged(playWhenReady: Boolean, playbackState: Int) {
+                val state = when (playbackState) {
+                    Player.STATE_IDLE -> "Idle"
+                    Player.STATE_BUFFERING -> "Buffering..."
+                    Player.STATE_READY -> if (playWhenReady) "Playing" else "Paused"
+                    Player.STATE_ENDED -> "Ended"
+                    else -> "Unknown"
+                }
+                statusText = "Player State: $state"
+            }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                statusText = "Error: ${error.message}\n${error.cause?.message}"
+            }
+        })
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        OutlinedTextField(
+            value = videoUrl,
+            onValueChange = { videoUrl = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 120.dp),
+            label = { Text("视频 URL") },
+            placeholder = { Text("例如: https://example.com/video.mp4") },
+            maxLines = 4
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = {
+                    try {
+                        statusText = "Loading video..."
+                        val mediaItem = MediaItem.fromUri(videoUrl)
+                        player.setMediaItem(mediaItem)
+                        player.prepare()
+                        player.play()
+                        statusText = "Playing: $videoUrl"
+                    } catch (e: Exception) {
+                        statusText = "Error: ${e.message}"
+                    }
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("播放")
+            }
+
+            Button(
+                onClick = {
+                    if (player.isPlaying) {
+                        player.pause()
+                        statusText = "Paused"
+                    } else {
+                        player.play()
+                        statusText = "Playing"
+                    }
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(if (player.isPlaying) "暂停" else "继续")
+            }
+
+            Button(
+                onClick = {
+                    player.stop()
+                    statusText = "Stopped"
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("停止")
+            }
+        }
+
+        // ExoPlayer 视频播放器视图
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        this.player = player
+                        useController = true
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        Text(
+            text = statusText,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 8.dp)
